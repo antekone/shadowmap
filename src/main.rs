@@ -61,18 +61,14 @@ impl ShadowManager {
     fn add_byte(&mut self, offset: u64, byte: u8) {
         let page_offs = self.get_page_offset(offset);
         let rel_offs = (offset - page_offs) as uint;
-        let (byte_idx, bit_idx) = self.get_bit_index(rel_offs);
-
-        println!("inserting byte {:02x} to page {:x} at offset {:x}", byte, page_offs, offset - page_offs);
-        println!("bit index is {}/{}", byte_idx, bit_idx);
+        let (_, bit_idx) = self.get_bit_index(rel_offs);
 
         if ! self.pages.contains_key(&page_offs) {
             let nsp = ShadowPage { buf: [0, ..PAGE_SIZE], map: [0, ..PAGE_SIZE / 8] };
             self.pages.insert(page_offs, nsp);
-            println!("added missing page");
         }
 
-        let mut shadow_page = match self.pages.get_mut(&page_offs) {
+        let shadow_page = match self.pages.get_mut(&page_offs) {
             Some(x) => x,
             None => return,
         };
@@ -81,6 +77,7 @@ impl ShadowManager {
         shadow_page.map[rel_offs / 8] |= 1 << bit_idx;
     }
 
+    #[allow(dead_code)]
     fn debug_dump(&self) {
         println!("--> There are {} shadow pages in repo.", self.pages.len());
         for (offset, sm) in self.pages.iter() {
@@ -100,14 +97,11 @@ impl ShadowManager {
     fn has_patch(&self, abs_offset: u64) -> bool {
         let page_offs = self.get_page_offset(abs_offset);
         let rel_offs = (abs_offset - page_offs) as uint;
-        let (byte_idx, bit_idx) = self.get_bit_index(rel_offs);
 
-        let sm = self.pages.get(&page_offs);
-        if let None = sm {
-            return false;
+        match self.pages.get(&page_offs) {
+            Some(sm) => sm.has_patch(rel_offs),
+            None => false,
         }
-
-        sm.unwrap().has_patch(rel_offs)
     }
 
     fn has_patch_in_range(&self, (beg, end): (u64, u64)) -> bool {
@@ -115,14 +109,9 @@ impl ShadowManager {
         let last_page = self.get_page_offset(end);
 
         let mut on_first_page = true;
-        let mut on_last_page = false;
-
-        println!("checking range {:x}-{:x}", beg, end);
 
         loop {
-            on_last_page = cur_page == last_page;
-
-            println!("cur_page={:x}, on_first_page? {}, on_last_page? {}", cur_page, on_first_page, on_last_page);
+            let on_last_page = cur_page == last_page;
 
             let sm = match self.pages.get(&cur_page) {
                 None => return false,
@@ -132,7 +121,6 @@ impl ShadowManager {
             if on_first_page && on_last_page {
                 let beg_rel = (beg - cur_page) as uint;
                 let end_rel = (end - cur_page) as uint;
-                println!("checking range {:x}-{:x}", beg_rel, end_rel);
 
                 if beg_rel == end_rel {
                     return sm.has_patch(beg_rel);
@@ -151,20 +139,16 @@ impl ShadowManager {
             }
 
             if on_last_page {
-                on_last_page = false;
-
                 let rel_to = end - cur_page;
                 return sm.has_patch_in_range((0, rel_to as uint));
             }
 
             cur_page += PAGE_SIZE as u64;
         }
-
-        false
     }
 
     fn debug_dump_offsets(&self) {
-        for (offset, sm) in self.pages.iter() {
+        for (offset, _) in self.pages.iter() {
             for i in range(0, PAGE_SIZE) {
                 let abs_offs = *offset + i as u64;
 
